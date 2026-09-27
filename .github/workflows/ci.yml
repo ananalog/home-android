@@ -1,0 +1,42 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Core tests (protocol over a fake BLE device)
+        run: ./gradlew :core:test --no-daemon
+      - name: Build APK
+        env:
+          VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0-dev' }}
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_BASE64 && 'release.jks' || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.jks; fi
+          ./gradlew :app:assembleDebug --no-daemon
+          if [ -f app/release.jks ]; then ./gradlew :app:assembleRelease --no-daemon; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: app/build/outputs/apk/**/*.apk
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/**/*.apk
